@@ -10,7 +10,7 @@ import io
 import datetime
 
 # --- 1. ページ基本設定 ---
-st.set_page_config(page_title="M-POG Archives & Stats", layout="wide")
+st.set_page_config(page_title="M-POG Archives & test", layout="wide")
 
 # ==========================================
 # 2. 設定ファイルの読み込み
@@ -248,3 +248,4 @@ with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
         display_html_stats(df_master, 'player')
+
