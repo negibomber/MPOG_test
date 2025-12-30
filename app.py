@@ -10,7 +10,7 @@ import io
 import datetime
 
 # --- 1. ページ基本設定 ---
-st.set_page_config(page_title="M-POG Archives", layout="wide")
+st.set_page_config(page_title="M-POG Archives & Stats", layout="wide")
 
 # ==========================================
 # 2. 設定ファイルの読み込み
@@ -26,11 +26,14 @@ def load_config():
 
 ARCHIVE_CONFIG = load_config()
 
-# 全選手のオーナー逆引き辞書（通算用）
+# 全選手のオーナー逆引き辞書 ＆ 色情報の収集
 ALL_PLAYER_TO_OWNER = {}
+OWNER_COLOR_MAP = {} 
 if ARCHIVE_CONFIG:
     for s_data in ARCHIVE_CONFIG.values():
         for owner_name, team_data in s_data.get('teams', {}).items():
+            if 'bg_color' in team_data:
+                OWNER_COLOR_MAP[owner_name] = team_data['bg_color']
             for p_name in team_data.get('players', []):
                 ALL_PLAYER_TO_OWNER[p_name] = owner_name
 
@@ -44,22 +47,21 @@ SEASON_START = str(conf.get("start_date", "20000101"))
 SEASON_END = str(conf.get("end_date", "20991231"))
 TEAM_CONFIG = conf.get("teams", {})
 
-# スタイル設定（ブラウザスクロールを優先し、内部スクロールを無効化）
+# スタイル設定
 st.markdown("""
 <style>
-    .pog-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.9rem; table-layout: auto; }
-    .pog-table th { background-color: #444; color: white !important; padding: 10px 8px; border: 1px solid #333; position: sticky; top: 0; z-index: 10; }
-    .pog-table td { border: 1px solid #ddd; padding: 8px; text-align: center; color: #000 !important; font-weight: bold; background-color: #fff; }
+    .pog-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.85rem; table-layout: auto; }
+    .pog-table th { background-color: #444; color: white !important; padding: 10px 5px; border: 1px solid #333; position: sticky; top: 0; z-index: 10; }
+    .pog-table td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; color: #000 !important; font-weight: bold; }
     .section-label { font-weight: bold; margin: 25px 0 10px 0; font-size: 1.3rem; border-left: 8px solid #444; padding-left: 12px; color: #333; }
-    /* Streamlit固有のコンテナ高さを自動に強制 */
-    .stDataFrame, .stTable { height: auto !important; max-height: none !important; }
+    .pct-label { font-size: 0.75rem; color: #555; font-weight: normal; margin-left: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title(f"🀄 M-POG Archives")
+st.title(f"🀄 M-POG Archives & Stats")
 
 # ==========================================
-# 3. データ処理（全データ読み込み ＆ 今期Web取得）
+# 3. データ処理
 # ==========================================
 
 @st.cache_data(ttl=1800)
@@ -146,8 +148,6 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🛠 データ管理")
     df_cur_season = df_master[df_master['season'] == selected_season]
-    
-    # CSV出力機能
     if not df_cur_season.empty:
         output = io.BytesIO()
         df_cur_season.to_csv(output, index=False, encoding='cp932')
@@ -157,14 +157,11 @@ with st.sidebar:
             file_name=f"history_{selected_season}.csv",
             mime="text/csv"
         )
-    
-    # アラート機能
     today_str = datetime.datetime.now().strftime('%Y%m%d')
     if today_str > SEASON_END:
         csv_path = f"history_{selected_season}.csv"
         if not os.path.exists(csv_path):
             st.error(f"⚠️ {selected_season} シーズンが終了しています。記録保存のためにCSVをアップロードしてください。")
-            
     if st.button('🔄 データを最新に更新'):
         st.cache_data.clear()
         st.rerun()
@@ -210,7 +207,6 @@ with tab1:
                         bg = TEAM_CONFIG.get(row.owner, {'bg_color':'#eee'})['bg_color']
                         html += f'<tr style="background-color:{bg}"><td>{row.player}</td><td>{row.owner}</td><td>{row.point:+.1f}</td></tr>'
                     st.markdown(html + '</table>', unsafe_allow_html=True)
-            
             st.markdown('<div class="section-label">📈 ポイント推移</div>', unsafe_allow_html=True)
             match_pts = df_cur.groupby(['match_uid', 'owner'])['point'].sum().unstack().fillna(0)
             sorted_uids = sorted(match_pts.index, key=lambda x: (x.split('_')[0], int(x.split('_')[1])))
@@ -221,21 +217,31 @@ with tab1:
                            color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# 共通集計関数：HTMLテーブルで強制出力
+# 通算成績用のHTMLテーブル表示（割合追加）
 def display_html_stats(df, group_key):
-    # 集計処理
     stats = df.groupby(group_key).agg(pt=('point','sum'), n=('point','count')).reset_index()
     for r in range(1, 5):
         stats[f'{r}着'] = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
     stats['平均'] = (stats['pt'] / stats['n']).round(2)
     stats = stats.sort_values('pt', ascending=False)
     
-    # HTML生成
-    html = f'<table class="pog-table"><thead><tr><th>{group_key}</th><th>通算pt</th><th>試合数</th><th>平均</th><th>1着</th><th>2着</th><th>3着</th><th>4着</th></tr></thead><tbody>'
+    html = f'<table class="pog-table"><thead><tr><th>{group_key}</th><th>通算pt</th><th>試合数</th><th>平均</th><th>1着(%)</th><th>2着(%)</th><th>3着(%)</th><th>4着(%)</th></tr></thead><tbody>'
     for r in stats.itertuples():
-        # インデックスアクセスの安全性を考慮
-        vals = [r.pt, r.n, r.平均, getattr(r, "_4"), getattr(r, "_5"), getattr(r, "_6"), getattr(r, "_7")]
-        html += f'<tr><td>{getattr(r, group_key)}</td><td>{vals[0]:+.1f}</td><td>{vals[1]}</td><td>{vals[2]:+.2f}</td><td>{vals[3]}</td><td>{vals[4]}</td><td>{vals[5]}</td><td>{vals[6]}</td></tr>'
+        target_name = getattr(r, group_key)
+        owner_name = target_name if group_key == 'owner' else ALL_PLAYER_TO_OWNER.get(target_name, "")
+        bg = OWNER_COLOR_MAP.get(owner_name, "#fff")
+        
+        n_match = r.n
+        def get_rank_cell(count):
+            pct = (count / n_match * 100).round(1) if n_match > 0 else 0
+            return f'<td>{count}<span class="pct-label">({pct}%)</span></td>'
+
+        html += f'<tr style="background-color:{bg}"><td>{target_name}</td><td>{r.pt:+.1f}</td><td>{n_match}</td><td>{r.平均:+.2f}</td>'
+        html += get_rank_cell(getattr(r, "_4"))
+        html += get_rank_cell(getattr(r, "_5"))
+        html += get_rank_cell(getattr(r, "_6"))
+        html += get_rank_cell(getattr(r, "_7"))
+        html += '</tr>'
     html += '</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)
 
@@ -248,6 +254,3 @@ with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
         display_html_stats(df_master, 'player')
-
-
-
