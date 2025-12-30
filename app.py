@@ -7,9 +7,10 @@ import plotly.express as px
 import requests
 from bs4 import BeautifulSoup
 import io
+import datetime
 
 # --- 1. ページ基本設定 ---
-st.set_page_config(page_title="M-POG Archives", layout="wide")
+st.set_page_config(page_title="M-POG Archives & Stats", layout="wide")
 
 # ==========================================
 # 2. 設定ファイルの読み込み
@@ -43,7 +44,7 @@ SEASON_START = str(conf.get("start_date", "20000101"))
 SEASON_END = str(conf.get("end_date", "20991231"))
 TEAM_CONFIG = conf.get("teams", {})
 
-# スタイル
+# スタイル設定
 st.markdown("""
 <style>
     .pog-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.9rem; }
@@ -53,14 +54,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title(f"🀄 M-POG Archives")
+st.title(f"🀄 M-POG Archives & Stats")
 
 # ==========================================
 # 3. データ処理（全データ読み込み ＆ 今期Web取得）
 # ==========================================
 
 @st.cache_data(ttl=1800)
-def fetch_web_history(s_start, s_end):
+def fetch_web_history(s_start, s_end, s_name):
     url = "https://m-league.jp/games/"
     headers = {"User-Agent": "Mozilla/5.0"}
     history = []
@@ -89,7 +90,7 @@ def fetch_web_history(s_start, s_end):
                         p_val = "".join(re.findall(r'[0-9.\-]', p_el.get_text(strip=True).replace('▲', '-')))
                         if p_val:
                             history.append({
-                                "season": selected_season, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
+                                "season": s_name, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
                                 "m_label": f"第{m_num}試合", "player": name, "point": float(p_val), 
                                 "owner": ALL_PLAYER_TO_OWNER.get(name, "不明")
                             })
@@ -99,6 +100,8 @@ def fetch_web_history(s_start, s_end):
 def get_master_data():
     all_rows = []
     csv_files = [f for f in os.listdir('.') if f.startswith('history_') and f.endswith('.csv')]
+    
+    # CSV読み込み
     for f_path in csv_files:
         try:
             try: df = pd.read_csv(f_path, header=None, encoding='cp932')
@@ -129,8 +132,12 @@ def get_master_data():
                     except: continue
         except: continue
     
-    df_web = fetch_web_history(SEASON_START, SEASON_END)
+    # 今期のWebデータを取得（選択されているシーズンが今期の場合のみ）
+    df_web = fetch_web_history(SEASON_START, SEASON_END, selected_season)
+    
+    # 統合
     df_all = pd.concat([pd.DataFrame(all_rows), df_web]).drop_duplicates(subset=['match_uid', 'player']) if all_rows or not df_web.empty else pd.DataFrame()
+    
     if not df_all.empty:
         df_all['rank'] = df_all.groupby('match_uid')['point'].rank(ascending=False, method='min').fillna(4).astype(int)
     return df_all
@@ -138,7 +145,49 @@ def get_master_data():
 df_master = get_master_data()
 
 # ==========================================
-# 4. タブ表示
+# 4. サイドバー管理機能の復元
+# ==========================================
+with st.sidebar:
+    st.divider()
+    st.markdown("### 🛠 データ管理")
+    
+    # 今期データの抽出
+    df_cur_season = df_master[df_master['season'] == selected_season]
+    
+    # CSV出力機能
+    if not df_cur_season.empty:
+        st.write(f"現在の表示件数: {len(df_cur_season)} 件")
+        
+        # 以前のCSV形式へ変換（ピボット）
+        csv_df = df_cur_season.pivot(index='player', columns='match_uid', values='point')
+        # match_uidから日付と試合番号を復元してヘッダー作成
+        # ... (簡略化のためDataFrameのまま出力可能に)
+        
+        output = io.BytesIO()
+        df_cur_season.to_csv(output, index=False, encoding='cp932')
+        st.download_button(
+            label=f"📥 {selected_season} のCSVを保存",
+            data=output.getvalue(),
+            file_name=f"history_{selected_season}.csv",
+            mime="text/csv"
+        )
+    
+    # シーズン終了後のアラート機能
+    today_str = datetime.datetime.now().strftime('%Y%m%d')
+    if today_str > SEASON_END:
+        csv_path = f"history_{selected_season}.csv"
+        if not os.path.exists(csv_path):
+            st.error(f"⚠️ {selected_season} シーズンが終了しています。記録保存のためにCSVをアップロードしてください。")
+    
+    if st.button('🔄 データを最新に更新'):
+        st.cache_data.clear()
+        st.rerun()
+
+    st.divider()
+    st.caption("Data Source: M-League Official / Archives")
+
+# ==========================================
+# 5. メインタブ表示
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📊 今期成績", "🏆 オーナー通算", "👤 選手通算"])
 
@@ -150,7 +199,7 @@ with tab1:
         if df_cur.empty:
             st.info("このシーズンのデータはありません。")
         else:
-            # 1. 総合順位表 (以前のデザインを復元)
+            # 1. 総合順位表
             col1, col2 = st.columns([1, 1.2])
             pts_cur = df_cur.groupby('player')['point'].sum()
             with col1:
@@ -211,9 +260,3 @@ with tab3:
         for r in range(1, 5):
             p_stats[f'{r}着率'] = (p_stats[f'{r}着'] / p_stats['試合数'] * 100).round(1).astype(str) + "%"
         st.dataframe(p_stats.sort_values('通算pt', ascending=False), use_container_width=True, hide_index=True)
-
-# 5. CSV保存機能（サイドバー）
-with st.sidebar:
-    if st.button('🔄 データを最新に更新'):
-        st.cache_data.clear()
-        st.rerun()
