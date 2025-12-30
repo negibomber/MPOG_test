@@ -89,7 +89,6 @@ def fetch_web_history(s_start, s_end, s_name):
                         name = n_el.get_text(strip=True)
                         p_val = "".join(re.findall(r'[0-9.\-]', p_el.get_text(strip=True).replace('▲', '-')))
                         if p_val:
-                            # 修正箇所: 最新のオーナー情報を確実に紐付け
                             history.append({
                                 "season": s_name, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
                                 "m_label": f"第{m_num}試合", "player": name, "point": float(p_val), 
@@ -122,23 +121,33 @@ def get_master_data():
                                 if not pd.isna(dates[b]) and str(dates[b]) != "":
                                     d_val = dates[b]; break
                         
-                        date_str = pd.to_datetime(d_val).strftime('%Y%m%d')
+                        current_date_str = pd.to_datetime(d_val).strftime('%Y%m%d')
                         m_num = int(float(str(nums[col])))
                         all_rows.append({
-                            "season": s_name, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
+                            "season": s_name, "date": current_date_str, "match_uid": f"{current_date_str}_{m_num}", 
                             "m_label": f"第{m_num}試合", "player": p_name, "point": score, 
                             "owner": ALL_PLAYER_TO_OWNER.get(p_name, "不明")
                         })
                     except: continue
         except: continue
     
+    # Webから最新分を取得
     df_web = fetch_web_history(SEASON_START, SEASON_END, selected_season)
-    df_all = pd.concat([pd.DataFrame(all_rows), df_web]).drop_duplicates(subset=['match_uid', 'player'], keep='last') if all_rows or not df_web.empty else pd.DataFrame()
+    
+    # 全データ結合
+    df_all = pd.concat([pd.DataFrame(all_rows), df_web]) if all_rows or not df_web.empty else pd.DataFrame()
     
     if not df_all.empty:
-        # 重複削除後にオーナー情報を最新の辞書で再マッピング（確実に一致させるため）
+        # 重複削除 (試合IDと選手名でユニークにする)
+        df_all = df_all.drop_duplicates(subset=['match_uid', 'player'], keep='last')
+        
+        # 【重要】オーナー情報を現在の設定ファイルに基づいて一括再適用
+        # これにより、CSV内の古い情報や読み込みミスを排除し、最新の設定に合わせます
         df_all['owner'] = df_all['player'].map(lambda x: ALL_PLAYER_TO_OWNER.get(x, "不明"))
+        
+        # 順位計算
         df_all['rank'] = df_all.groupby('match_uid')['point'].rank(ascending=False, method='min').fillna(4).astype(int)
+    
     return df_all
 
 df_master = get_master_data()
@@ -218,6 +227,7 @@ with tab1:
                             color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
+# 通算計算ロジック
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
