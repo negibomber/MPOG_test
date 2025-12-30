@@ -26,11 +26,14 @@ def load_config():
 
 ARCHIVE_CONFIG = load_config()
 
-# 全選手のオーナー逆引き辞書
+# 全選手のオーナー逆引き辞書 ＆ 色情報の収集
 ALL_PLAYER_TO_OWNER = {}
+OWNER_COLOR_MAP = {} 
 if ARCHIVE_CONFIG:
     for s_data in ARCHIVE_CONFIG.values():
         for owner_name, team_data in s_data.get('teams', {}).items():
+            if 'bg_color' in team_data:
+                OWNER_COLOR_MAP[owner_name] = team_data['bg_color']
             for p_name in team_data.get('players', []):
                 ALL_PLAYER_TO_OWNER[p_name] = owner_name
 
@@ -44,12 +47,9 @@ SEASON_START = str(conf.get("start_date", "20000101"))
 SEASON_END = str(conf.get("end_date", "20991231"))
 TEAM_CONFIG = conf.get("teams", {})
 
-# スタイル設定（テーブルの見た目を整え、スクロールを発生させない）
+# スタイル設定
 st.markdown("""
 <style>
-    /* テーブル全体のフォントサイズ調整 */
-    .stTable { font-size: 0.85rem; width: 100%; }
-    .stTable td, .stTable th { text-align: center !important; white-space: nowrap; }
     .section-label { font-weight: bold; margin: 25px 0 10px 0; font-size: 1.3rem; border-left: 8px solid #444; padding-left: 12px; color: #333; }
 </style>
 """, unsafe_allow_html=True)
@@ -181,7 +181,7 @@ with tab1:
                     s = sum(pts_cur.get(p, 0) for p in c.get('players', []))
                     summary.append({"オーナー": o, "合計": s})
                 df_s = pd.DataFrame(summary).sort_values("合計", ascending=False)
-                # 今期成績はオーナーカラーを表示したいのでHTML
+                # 今期順位はオーナーカラー付きHTML
                 html = '<table width="100%" style="border-collapse:collapse; font-size:0.9rem;">'
                 html += '<tr style="background:#444; color:white;"><th>順位</th><th>オーナー</th><th>合計</th></tr>'
                 for i, r in enumerate(df_s.itertuples(), 1):
@@ -212,27 +212,42 @@ with tab1:
                            color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
+# 通算成績用のデータ作成
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
-        counts = df[df['rank']==r].groupby(group_key)['rank'].count()
-        stats[f'{r}着'] = counts.reindex(stats[group_key], fill_value=0).values
-        # 割合の計算
-        stats[f'{r}着(%)'] = (stats[f'{r}着'] / stats['試合数'] * 100).map('{:.1f}%'.format)
-        # 表示用に「回数(割合)」の文字列を作成
-        stats[f'{r}着'] = stats.apply(lambda row: f"{row[f'{r}着']} ({row[f'{r}着(%)']})", axis=1)
-    
+        counts = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
+        stats[f'{r}着'] = counts
+        stats[f'{r}着(%)'] = (counts / stats['試合数'] * 100).round(1).astype(str) + '%'
+        # 表示用に「回数(割合)」を結合
+        stats[f'{r}着'] = stats[f'{r}着'].astype(str) + " (" + stats[f'{r}着(%)'] + ")"
+
     stats['平均pt'] = (stats['通算pt'] / stats['試合数']).round(2)
-    # 不要な列を削除して並べ替え
     cols = [group_key, '通算pt', '試合数', '平均pt', '1着', '2着', '3着', '4着']
     return stats[cols].sort_values('通算pt', ascending=False)
 
 with tab2:
     st.markdown('<div class="section-label">🏅 オーナー別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        st.table(get_stats_df(df_master, 'owner').set_index('owner'))
+        df_owner = get_stats_df(df_master, 'owner')
+        # 背景色適用
+        def style_owner(row):
+            color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
+            return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
+        
+        st.dataframe(
+            df_owner.set_index('owner').style.apply(style_owner, axis=1).format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
+            use_container_width=True,
+            height=None  # 全件表示
+        )
 
 with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        st.table(get_stats_df(df_master, 'player').set_index('player'))
+        df_player = get_stats_df(df_master, 'player')
+        # 選手別は色なし
+        st.dataframe(
+            df_player.set_index('player').style.format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
+            use_container_width=True,
+            height=None  # 全件表示
+        )
