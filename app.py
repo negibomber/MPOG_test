@@ -89,6 +89,7 @@ def fetch_web_history(s_start, s_end, s_name):
                         name = n_el.get_text(strip=True)
                         p_val = "".join(re.findall(r'[0-9.\-]', p_el.get_text(strip=True).replace('▲', '-')))
                         if p_val:
+                            # 修正箇所: 最新のオーナー情報を確実に紐付け
                             history.append({
                                 "season": s_name, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
                                 "m_label": f"第{m_num}試合", "player": name, "point": float(p_val), 
@@ -121,7 +122,6 @@ def get_master_data():
                                 if not pd.isna(dates[b]) and str(dates[b]) != "":
                                     d_val = dates[b]; break
                         
-                        # ここを修正しました (d_str ではなく date_str に統一)
                         date_str = pd.to_datetime(d_val).strftime('%Y%m%d')
                         m_num = int(float(str(nums[col])))
                         all_rows.append({
@@ -131,9 +131,13 @@ def get_master_data():
                         })
                     except: continue
         except: continue
+    
     df_web = fetch_web_history(SEASON_START, SEASON_END, selected_season)
-    df_all = pd.concat([pd.DataFrame(all_rows), df_web]).drop_duplicates(subset=['match_uid', 'player']) if all_rows or not df_web.empty else pd.DataFrame()
+    df_all = pd.concat([pd.DataFrame(all_rows), df_web]).drop_duplicates(subset=['match_uid', 'player'], keep='last') if all_rows or not df_web.empty else pd.DataFrame()
+    
     if not df_all.empty:
+        # 重複削除後にオーナー情報を最新の辞書で再マッピング（確実に一致させるため）
+        df_all['owner'] = df_all['player'].map(lambda x: ALL_PLAYER_TO_OWNER.get(x, "不明"))
         df_all['rank'] = df_all.groupby('match_uid')['point'].rank(ascending=False, method='min').fillna(4).astype(int)
     return df_all
 
