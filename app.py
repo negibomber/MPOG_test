@@ -48,21 +48,26 @@ SEASON_START = str(conf.get("start_date", "20000101"))
 SEASON_END = str(conf.get("end_date", "20991231"))
 TEAM_CONFIG = conf.get("teams", {})
 
-# --- スタイル設定 (範囲を限定した設定) ---
+# --- スタイル設定 (コントラストを最適化) ---
 st.markdown("""
 <style>
     .section-label { font-weight: bold; margin: 25px 0 10px 0; font-size: 1.3rem; border-left: 8px solid #444; padding-left: 12px; color: #333; }
     
-    /* 自作のHTMLテーブル (今期成績) 内の文字だけを黒にする */
-    .pog-table td, .pog-table th {
+    /* 1. 自作HTMLテーブルの「データ行(td)」だけを黒文字に固定 (明るい背景用) */
+    .pog-table td {
         color: black !important;
     }
+    /* 2. 自作HTMLテーブルの「ヘッダー(th)」は白文字を維持 (暗い背景用) */
+    .pog-table th {
+        color: white !important;
+    }
 
-    /* Streamlitの st.dataframe 内のセルの文字だけを黒にする */
-    [data-testid="stTable"] td, [data-testid="stTable"] th, 
+    /* 3. Streamlitの st.dataframe 内の「データセル」だけを黒文字に固定 */
+    [data-testid="stTable"] td, 
     [data-testid="stDataFrame"] div[data-testid="stTable"] td {
         color: black !important;
     }
+    /* 4. Streamlitの st.dataframe の「ヘッダー」はシステムの自動判定に任せる(黒のままならOK) */
 </style>
 """, unsafe_allow_html=True)
 
@@ -264,7 +269,7 @@ with tab2:
         df_owner = get_stats_df(df_master, 'owner')
         def style_owner_all(row):
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
-            return [f'background-color: {color}; font-weight: bold'] * len(row)
+            return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
         st.dataframe(
             df_owner.set_index('owner').style.apply(style_owner_all, axis=1),
             use_container_width=True,
