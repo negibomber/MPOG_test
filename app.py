@@ -51,7 +51,7 @@ st.title(f"🀄 M-POG {selected_season}")
 # ==========================================
 
 def load_history_from_csv(file_path):
-    """CSVから読み込む際、2行目の試合番号を厳密に判別する"""
+    """CSVから読み込む際、スコアが存在するデータのみを抽出する"""
     if not os.path.exists(file_path): return pd.DataFrame()
     try: raw_df = pd.read_csv(file_path, header=None, encoding='cp932')
     except: raw_df = pd.read_csv(file_path, header=None, encoding='utf-8')
@@ -66,11 +66,15 @@ def load_history_from_csv(file_path):
         
         for col in range(1, len(raw_df.columns)):
             val = raw_df.iloc[i, col]
+            # ポイントが空、または欠損値の場合はその試合には出場していないとみなしてスキップ
             if pd.isna(val) or str(val).strip() == "": continue
-            try: score = float(str(val).replace(' ', ''))
-            except: continue
             
-            # 日付の取得
+            try: 
+                score = float(str(val).replace(' ', ''))
+            except: 
+                continue
+            
+            # 日付の取得（結合セル対応）
             d_val = dates_row[col]
             if pd.isna(d_val) or str(d_val).strip() in ["", "nan"]:
                 for back in range(col, 0, -1):
@@ -82,14 +86,13 @@ def load_history_from_csv(file_path):
                 dt_str = pd.to_datetime(d_val).strftime('%Y%m%d')
             except: continue
 
-            # 試合番号の取得（CSV2行目から確実に数値として取る）
+            # 試合番号の取得
             m_raw = match_nums[col]
             try:
                 m_num = int(float(str(m_raw).strip()))
             except:
                 m_num = 1
             
-            # 日付と試合番号で一意のIDを作成
             history.append({
                 "date": dt_str, 
                 "m_label": f"第{m_num}試合", 
@@ -175,20 +178,22 @@ else:
         st.markdown(f'<div class="section-label">🀄 最新結果 ({latest_date[4:6]}/{latest_date[6:]})</div>', unsafe_allow_html=True)
         df_latest = df_history[df_history['date'] == latest_date]
         
-        # 試合ID（match_uid）ごとにループし、個別の表を作成
+        # 試合(match_uid)ごとに個別の表として出力
         for m_uid in sorted(df_latest['match_uid'].unique()):
+            # ここでその試合IDに紐づく選手（出場した4人）だけを抽出
             df_m = df_latest[df_latest['match_uid'] == m_uid].sort_values("point", ascending=False)
             
-            st.write(f"**{df_m['m_label'].iloc[0]}**")
-            html = '<table class="pog-table"><tr><th>選手</th><th>オーナー</th><th>ポイント</th></tr>'
-            for row in df_m.itertuples():
-                bg = TEAM_CONFIG[row.owner]['bg_color']
-                html += f'<tr style="background-color:{bg}"><td>{row.player}</td><td>{row.owner}</td><td>{row.point:+.1f}</td></tr>'
-            html += '</table>'
-            st.markdown(html, unsafe_allow_html=True)
+            # 4人揃っている場合のみ表示（念のためのガード）
+            if not df_m.empty:
+                st.write(f"**{df_m['m_label'].iloc[0]}**")
+                html = '<table class="pog-table"><tr><th>選手</th><th>オーナー</th><th>ポイント</th></tr>'
+                for row in df_m.itertuples():
+                    bg = TEAM_CONFIG[row.owner]['bg_color']
+                    html += f'<tr style="background-color:{bg}"><td>{row.player}</td><td>{row.owner}</td><td>{row.point:+.1f}</td></tr>'
+                html += '</table>'
+                st.markdown(html, unsafe_allow_html=True)
 
     st.write("---")
-    # グラフとランキング表示（変更なし）
     st.markdown('<div class="section-label">📈 ポイント推移グラフ</div>', unsafe_allow_html=True)
     daily = df_history.groupby(['date', 'owner'])['point'].sum().unstack().fillna(0).cumsum().reset_index()
     daily['date'] = pd.to_datetime(daily['date']).dt.strftime('%m/%d')
