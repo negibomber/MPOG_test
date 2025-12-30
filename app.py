@@ -195,7 +195,9 @@ with tab1:
                 for uid in sorted(df_l['match_uid'].unique()):
                     df_m = df_l[df_l['match_uid'] == uid].sort_values("point", ascending=False)
                     st.write(f"**{df_m['m_label'].iloc[0]}**")
+                    # 修正：ヘッダー行を追加
                     html = '<table width="100%" style="border-collapse:collapse; font-size:0.85rem;">'
+                    html += '<tr style="background:#666; color:white;"><th>選手</th><th>オーナー</th><th>ポイント</th></tr>'
                     for row in df_m.itertuples():
                         bg = TEAM_CONFIG.get(row.owner, {'bg_color':'#eee'})['bg_color']
                         html += f'<tr style="background-color:{bg}; border-bottom:1px solid #ddd;"><td style="padding:6px; text-align:center;">{row.player}</td><td style="padding:6px; text-align:center;">{row.owner}</td><td style="padding:6px; text-align:center;">{row.point:+.1f}</td></tr>'
@@ -231,7 +233,7 @@ with tab2:
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
             return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
         
-        # height引数を削除してデフォルト（または"auto"）に任せる
+        # エラー回避のため height を完全に省略し、ソート機能を優先
         st.dataframe(
             df_owner.set_index('owner').style.apply(style_owner, axis=1).format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
             use_container_width=True
