@@ -217,31 +217,35 @@ with tab1:
                            color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# 通算成績用のHTMLテーブル表示（割合追加）
+# 通算成績用のHTMLテーブル表示（エラー修正版）
 def display_html_stats(df, group_key):
+    # 集計
     stats = df.groupby(group_key).agg(pt=('point','sum'), n=('point','count')).reset_index()
     for r in range(1, 5):
-        stats[f'{r}着'] = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
-    stats['平均'] = (stats['pt'] / stats['n']).round(2)
+        stats[f'r{r}'] = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
+    stats['avg'] = (stats['pt'] / stats['n']).round(2)
     stats = stats.sort_values('pt', ascending=False)
     
     html = f'<table class="pog-table"><thead><tr><th>{group_key}</th><th>通算pt</th><th>試合数</th><th>平均</th><th>1着(%)</th><th>2着(%)</th><th>3着(%)</th><th>4着(%)</th></tr></thead><tbody>'
+    
     for r in stats.itertuples():
-        target_name = getattr(r, group_key)
-        owner_name = target_name if group_key == 'owner' else ALL_PLAYER_TO_OWNER.get(target_name, "")
+        name = getattr(r, group_key)
+        owner_name = name if group_key == 'owner' else ALL_PLAYER_TO_OWNER.get(name, "")
         bg = OWNER_COLOR_MAP.get(owner_name, "#fff")
         
         n_match = r.n
         def get_rank_cell(count):
-            pct = (count / n_match * 100).round(1) if n_match > 0 else 0
-            return f'<td>{count}<span class="pct-label">({pct}%)</span></td>'
+            # round(1) の代わりに python標準の round() または format文字列を使用
+            pct = (count / n_match * 100) if n_match > 0 else 0
+            return f'<td>{count}<span class="pct-label">({pct:.1f}%)</span></td>'
 
-        html += f'<tr style="background-color:{bg}"><td>{target_name}</td><td>{r.pt:+.1f}</td><td>{n_match}</td><td>{r.平均:+.2f}</td>'
-        html += get_rank_cell(getattr(r, "_4"))
-        html += get_rank_cell(getattr(r, "_5"))
-        html += get_rank_cell(getattr(r, "_6"))
-        html += get_rank_cell(getattr(r, "_7"))
+        html += f'<tr style="background-color:{bg}"><td>{name}</td><td>{r.pt:+.1f}</td><td>{n_match}</td><td>{r.avg:+.2f}</td>'
+        html += get_rank_cell(r.r1)
+        html += get_rank_cell(r.r2)
+        html += get_rank_cell(r.r3)
+        html += get_rank_cell(r.r4)
         html += '</tr>'
+    
     html += '</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)
 
