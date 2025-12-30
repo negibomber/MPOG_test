@@ -26,16 +26,18 @@ def load_config():
 
 ARCHIVE_CONFIG = load_config()
 
-# 全選手のオーナー逆引き辞書 ＆ 色情報の収集
-ALL_PLAYER_TO_OWNER = {}
-OWNER_COLOR_MAP = {} 
+# シーズンごとの選手所属を管理するネストした辞書を作成
+# { "2024": {"選手A": "オーナーX", ...}, "2023": {"選手A": "オーナーY", ...} }
+SEASON_PLAYER_MAP = {}
+OWNER_COLOR_MAP = {} # 全期間の色設定
 if ARCHIVE_CONFIG:
-    for s_data in ARCHIVE_CONFIG.values():
+    for s_name, s_data in ARCHIVE_CONFIG.items():
+        SEASON_PLAYER_MAP[s_name] = {}
         for owner_name, team_data in s_data.get('teams', {}).items():
             if 'bg_color' in team_data:
                 OWNER_COLOR_MAP[owner_name] = team_data['bg_color']
             for p_name in team_data.get('players', []):
-                ALL_PLAYER_TO_OWNER[p_name] = owner_name
+                SEASON_PLAYER_MAP[s_name][p_name] = owner_name
 
 # サイドバー：シーズン選択
 seasons = sorted(list(ARCHIVE_CONFIG.keys()), reverse=True) if ARCHIVE_CONFIG else ["No Data"]
@@ -65,6 +67,8 @@ def fetch_web_history(s_start, s_end, s_name):
     url = "https://m-league.jp/games/"
     headers = {"User-Agent": "Mozilla/5.0"}
     history = []
+    # 今期の所属マップ
+    current_map = SEASON_PLAYER_MAP.get(s_name, {})
     try:
         res = requests.get(url, headers=headers, timeout=10)
         res.encoding = res.apparent_encoding
@@ -92,7 +96,7 @@ def fetch_web_history(s_start, s_end, s_name):
                             history.append({
                                 "season": s_name, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
                                 "m_label": f"第{m_num}試合", "player": name, "point": float(p_val), 
-                                "owner": ALL_PLAYER_TO_OWNER.get(name, "不明")
+                                "owner": current_map.get(name, "不明")
                             })
         return pd.DataFrame(history)
     except: return pd.DataFrame()
@@ -107,6 +111,9 @@ def get_master_data():
             if len(df) < 3: continue
             dates, nums = df.iloc[0].tolist(), df.iloc[1].tolist()
             s_name = f_path.replace("history_","").replace(".csv","")
+            # そのCSVのシーズンの所属マップ
+            season_map = SEASON_PLAYER_MAP.get(s_name, {})
+            
             for i in range(2, len(df)):
                 p_name = str(df.iloc[i, 0]).strip()
                 if not p_name or p_name == "nan": continue
@@ -121,33 +128,21 @@ def get_master_data():
                                 if not pd.isna(dates[b]) and str(dates[b]) != "":
                                     d_val = dates[b]; break
                         
-                        current_date_str = pd.to_datetime(d_val).strftime('%Y%m%d')
+                        date_str_val = pd.to_datetime(d_val).strftime('%Y%m%d')
                         m_num = int(float(str(nums[col])))
                         all_rows.append({
-                            "season": s_name, "date": current_date_str, "match_uid": f"{current_date_str}_{m_num}", 
+                            "season": s_name, "date": date_str_val, "match_uid": f"{date_str_val}_{m_num}", 
                             "m_label": f"第{m_num}試合", "player": p_name, "point": score, 
-                            "owner": ALL_PLAYER_TO_OWNER.get(p_name, "不明")
+                            "owner": season_map.get(p_name, "不明")
                         })
                     except: continue
         except: continue
     
-    # Webから最新分を取得
     df_web = fetch_web_history(SEASON_START, SEASON_END, selected_season)
-    
-    # 全データ結合
-    df_all = pd.concat([pd.DataFrame(all_rows), df_web]) if all_rows or not df_web.empty else pd.DataFrame()
+    df_all = pd.concat([pd.DataFrame(all_rows), df_web]).drop_duplicates(subset=['match_uid', 'player'], keep='last') if all_rows or not df_web.empty else pd.DataFrame()
     
     if not df_all.empty:
-        # 重複削除 (試合IDと選手名でユニークにする)
-        df_all = df_all.drop_duplicates(subset=['match_uid', 'player'], keep='last')
-        
-        # 【重要】オーナー情報を現在の設定ファイルに基づいて一括再適用
-        # これにより、CSV内の古い情報や読み込みミスを排除し、最新の設定に合わせます
-        df_all['owner'] = df_all['player'].map(lambda x: ALL_PLAYER_TO_OWNER.get(x, "不明"))
-        
-        # 順位計算
         df_all['rank'] = df_all.groupby('match_uid')['point'].rank(ascending=False, method='min').fillna(4).astype(int)
-    
     return df_all
 
 df_master = get_master_data()
@@ -227,7 +222,6 @@ with tab1:
                             color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# 通算計算ロジック
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
@@ -251,6 +245,7 @@ with tab2:
     if not df_master.empty:
         df_owner = get_stats_df(df_master, 'owner')
         def style_owner_all(row):
+            # オーナー名はindexに格納されている
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
             return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
         st.dataframe(
