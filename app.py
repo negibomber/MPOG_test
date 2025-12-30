@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 import io
 import datetime
+import streamlit.components.v1 as components
 
 # --- 1. ページ基本設定 ---
 st.set_page_config(page_title="M-POG Archives & Stats", layout="wide")
@@ -47,15 +48,61 @@ SEASON_START = str(conf.get("start_date", "20000101"))
 SEASON_END = str(conf.get("end_date", "20991231"))
 TEAM_CONFIG = conf.get("teams", {})
 
-# スタイル設定
+# スタイル設定 & ソート用JavaScript
 st.markdown("""
 <style>
     .pog-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.85rem; table-layout: auto; }
-    .pog-table th { background-color: #444; color: white !important; padding: 10px 5px; border: 1px solid #333; position: sticky; top: 0; z-index: 10; }
+    .pog-table th { background-color: #444; color: white !important; padding: 10px 5px; border: 1px solid #333; position: sticky; top: 0; z-index: 10; cursor: pointer; }
+    .pog-table th:hover { background-color: #666; }
     .pog-table td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; color: #000 !important; font-weight: bold; }
     .section-label { font-weight: bold; margin: 25px 0 10px 0; font-size: 1.3rem; border-left: 8px solid #444; padding-left: 12px; color: #333; }
     .pct-label { font-size: 0.75rem; color: #555; font-weight: normal; margin-left: 2px; }
 </style>
+
+<script>
+function sortTable(tableId, n) {
+  var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+  table = document.getElementById(tableId);
+  switching = True;
+  dir = "asc";
+  while (switching) {
+    switching = False;
+    rows = table.rows;
+    for (i = 1; i < (rows.length - 1); i++) {
+      shouldSwitch = False;
+      x = rows[i].getElementsByTagName("TD")[n];
+      y = rows[i + 1].getElementsByTagName("TD")[n];
+      
+      var xVal = x.innerText.replace(/[^0-9.-]/g, "");
+      var yVal = y.innerText.replace(/[^0-9.-]/g, "");
+      
+      if (isNaN(parseFloat(xVal))) {
+          xVal = x.innerText.toLowerCase();
+          yVal = y.innerText.toLowerCase();
+      } else {
+          xVal = parseFloat(xVal);
+          yVal = parseFloat(yVal);
+      }
+
+      if (dir == "asc") {
+        if (xVal > yVal) { shouldSwitch = True; break; }
+      } else if (dir == "desc") {
+        if (xVal < yVal) { shouldSwitch = True; break; }
+      }
+    }
+    if (shouldSwitch) {
+      rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+      switching = True;
+      switchcount ++;
+    } else {
+      if (switchcount == 0 && dir == "asc") {
+        dir = "desc";
+        switching = True;
+      }
+    }
+  }
+}
+</script>
 """, unsafe_allow_html=True)
 
 st.title(f"🀄 M-POG Archives & Stats")
@@ -217,25 +264,29 @@ with tab1:
                            color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# 通算成績用のHTMLテーブル表示（エラー修正版）
-def display_html_stats(df, group_key):
-    # 集計
+# 通算成績用のHTMLテーブル表示（ソート対応版）
+def display_html_stats(df, group_key, use_color=True):
+    table_id = f"table_{group_key}"
     stats = df.groupby(group_key).agg(pt=('point','sum'), n=('point','count')).reset_index()
     for r in range(1, 5):
         stats[f'r{r}'] = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
     stats['avg'] = (stats['pt'] / stats['n']).round(2)
     stats = stats.sort_values('pt', ascending=False)
     
-    html = f'<table class="pog-table"><thead><tr><th>{group_key}</th><th>通算pt</th><th>試合数</th><th>平均</th><th>1着(%)</th><th>2着(%)</th><th>3着(%)</th><th>4着(%)</th></tr></thead><tbody>'
+    headers = [group_key, "通算pt", "試合数", "平均", "1着(%)", "2着(%)", "3着(%)", "4着(%)"]
+    header_html = "".join([f'<th onclick="sortTable(\'{table_id}\', {i})">{h}</th>' for i, h in enumerate(headers)])
+    
+    html = f'<table class="pog-table" id="{table_id}"><thead><tr>{header_html}</tr></thead><tbody>'
     
     for r in stats.itertuples():
         name = getattr(r, group_key)
-        owner_name = name if group_key == 'owner' else ALL_PLAYER_TO_OWNER.get(name, "")
-        bg = OWNER_COLOR_MAP.get(owner_name, "#fff")
+        bg = "#fff"
+        if use_color:
+            owner_name = name if group_key == 'owner' else ALL_PLAYER_TO_OWNER.get(name, "")
+            bg = OWNER_COLOR_MAP.get(owner_name, "#fff")
         
         n_match = r.n
         def get_rank_cell(count):
-            # round(1) の代わりに python標準の round() または format文字列を使用
             pct = (count / n_match * 100) if n_match > 0 else 0
             return f'<td>{count}<span class="pct-label">({pct:.1f}%)</span></td>'
 
@@ -252,9 +303,9 @@ def display_html_stats(df, group_key):
 with tab2:
     st.markdown('<div class="section-label">🏅 オーナー別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        display_html_stats(df_master, 'owner')
+        display_html_stats(df_master, 'owner', use_color=True)
 
 with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        display_html_stats(df_master, 'player')
+        display_html_stats(df_master, 'player', use_color=False)
