@@ -28,21 +28,16 @@ if not ARCHIVE_CONFIG:
     st.error("設定ファイル draft_configs.json が見つかりません。")
     st.stop()
 
-# 年度リストを新しい順に並べる
 seasons = sorted(list(ARCHIVE_CONFIG.keys()), reverse=True)
 selected_season = st.sidebar.selectbox("表示するシーズンを選択", seasons, index=0)
 
-# 選択された年度の設定
 conf = ARCHIVE_CONFIG[selected_season]
 SEASON_START = str(conf["start_date"])
 SEASON_END = str(conf["end_date"])
 TEAM_CONFIG = conf["teams"]
 PLAYER_TO_OWNER = {p: owner for owner, c in TEAM_CONFIG.items() for p in c['players']}
 
-# 今日の日付
-today_str = datetime.datetime.now().strftime('%Y%m%d')
-
-# --- スタイル設定 (CSS) ---
+# --- スタイル設定 ---
 st.markdown("""
 <style>
     .pog-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
@@ -140,7 +135,7 @@ def get_web_history(season_start, season_end):
         st.error(f"Webデータ取得中にエラーが発生しました: {e}")
         return pd.DataFrame()
 
-# --- データの取得実行 ---
+# --- 実行 ---
 csv_file = f"history_{selected_season}.csv"
 if os.path.exists(csv_file):
     df_history = load_history_from_csv(csv_file)
@@ -150,7 +145,7 @@ else:
     data_source = "web"
 
 # ==========================================
-# 4. メイン画面表示
+# 4. 表示
 # ==========================================
 if df_history.empty:
     st.warning(f"{selected_season} のデータが見つかりません。")
@@ -179,7 +174,7 @@ else:
         latest_date = df_history['date'].max()
         st.markdown(f'<div class="section-label">🀄 最新結果 ({latest_date[4:6]}/{latest_date[6:]})</div>', unsafe_allow_html=True)
         df_latest = df_history[df_history['date'] == latest_date]
-        uids = sorted(df_latest['match_uid'].unique(), key=lambda x: int(x.split('_')[1]))
+        uids = sorted(df_latest['match_uid'].unique(), key=lambda x: (x.split('_')[0], int(x.split('_')[1])))
         for m_uid in uids:
             df_m = df_latest[df_latest['match_uid'] == m_uid].sort_values("point", ascending=False)
             if not df_m.empty:
@@ -191,13 +186,36 @@ else:
                 st.markdown(html + '</table>', unsafe_allow_html=True)
 
     st.write("---")
+    
+    # --- ポイント推移グラフの修正 ---
     st.markdown('<div class="section-label">📈 ポイント推移グラフ</div>', unsafe_allow_html=True)
-    df_history_sorted = df_history.sort_values(['date', 'match_uid'])
-    daily = df_history_sorted.groupby(['date', 'match_uid', 'owner'])['point'].sum().unstack().fillna(0).cumsum().reset_index()
-    daily['date_label'] = daily['date'].str[4:6] + "/" + daily['date'].str[6:]
-    df_plot = daily.melt(id_vars=['date', 'match_uid', 'date_label'], var_name='オーナー', value_name='累計pt')
-    fig_line = px.line(df_plot, x='date_label', y='累計pt', color='オーナー', 
-                       color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
+    
+    # 1. 試合単位(match_uid)でオーナーごとの合計ポイントを算出
+    match_owner_pts = df_history.groupby(['match_uid', 'owner'])['point'].sum().unstack().fillna(0)
+    
+    # 2. match_uidを日付と試合番号で正しく並び替える
+    sorted_uids = sorted(match_owner_pts.index, key=lambda x: (x.split('_')[0], int(x.split('_')[1])))
+    match_owner_pts = match_owner_pts.reindex(sorted_uids)
+    
+    # 3. 累積和(cumsum)を計算
+    daily_cum = match_owner_pts.cumsum().reset_index()
+    
+    # 4. X軸用のラベルを作成（例: 12/30-1, 12/30-2）
+    def format_label(uid):
+        d, m = uid.split('_')
+        return f"{d[4:6]}/{d[6:]}-{m}"
+    
+    daily_cum['display_label'] = daily_cum['match_uid'].apply(format_label)
+    
+    # 5. プロット用にデータ整形
+    df_plot = daily_cum.melt(id_vars=['match_uid', 'display_label'], var_name='オーナー', value_name='累計pt')
+    
+    fig_line = px.line(df_plot, x='display_label', y='累計pt', color='オーナー', 
+                       color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, 
+                       markers=True,
+                       category_orders={"display_label": daily_cum['display_label'].tolist()}) # 並び順を強制
+    
+    fig_line.update_layout(xaxis_title="試合 (月/日-試合番号)", yaxis_title="累計ポイント")
     st.plotly_chart(fig_line, use_container_width=True)
 
     st.markdown('<div class="section-label">👤 個人ランキング</div>', unsafe_allow_html=True)
@@ -221,21 +239,13 @@ with st.sidebar:
     elif not df_history.empty:
         st.warning(f"🌐 公式サイトの最新データを表示中")
         
-        # --- CSV出力ロジックの修正 ---
-        # 1. ピボットテーブルを作成
         pivot_df = df_history.pivot(index='player', columns=['date', 'm_label'], values='point')
-        
-        # 2. 列を(日付, 試合番号)で正しくソート
         sorted_cols = sorted(pivot_df.columns, key=lambda x: (x[0], int(x[1].replace('第','').replace('試合',''))))
         pivot_df = pivot_df[sorted_cols]
         
-        # 3. 出力用の形式を整える
-        # ヘッダー1行目（日付）
         h1 = [""] + [pd.to_datetime(c[0]).strftime('%Y/%m/%d') for c in sorted_cols]
-        # ヘッダー2行目（試合番号）
         h2 = [""] + [c[1].replace("第", "").replace("試合", "") for c in sorted_cols]
         
-        # 4. 全選手分を埋める
         all_players = sorted(list(PLAYER_TO_OWNER.keys()))
         rows = [h1, h2]
         for p in all_players:
@@ -245,7 +255,6 @@ with st.sidebar:
                 row.append(val)
             rows.append(row)
         
-        # 5. Pandasを使って確実にCSV化
         output_df = pd.DataFrame(rows)
         csv_buffer = io.BytesIO()
         output_df.to_csv(csv_buffer, index=False, header=False, encoding='cp932')
