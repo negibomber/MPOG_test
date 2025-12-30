@@ -48,8 +48,8 @@ TEAM_CONFIG = conf.get("teams", {})
 st.markdown("""
 <style>
     .pog-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.9rem; }
-    .pog-table th { background-color: #444; color: white !important; padding: 8px; border: 1px solid #333; }
-    .pog-table td { border: 1px solid #ddd; padding: 8px; text-align: center; color: #000 !important; font-weight: bold; }
+    .pog-table th { background-color: #444; color: white !important; padding: 8px; border: 1px solid #333; position: sticky; top: 0; z-index: 10; }
+    .pog-table td { border: 1px solid #ddd; padding: 8px; text-align: center; color: #000 !important; font-weight: bold; background-color: #fff; }
     .section-label { font-weight: bold; margin: 25px 0 10px 0; font-size: 1.3rem; border-left: 8px solid #444; padding-left: 12px; color: #333; }
 </style>
 """, unsafe_allow_html=True)
@@ -100,8 +100,6 @@ def fetch_web_history(s_start, s_end, s_name):
 def get_master_data():
     all_rows = []
     csv_files = [f for f in os.listdir('.') if f.startswith('history_') and f.endswith('.csv')]
-    
-    # CSV読み込み
     for f_path in csv_files:
         try:
             try: df = pd.read_csv(f_path, header=None, encoding='cp932')
@@ -131,13 +129,8 @@ def get_master_data():
                         })
                     except: continue
         except: continue
-    
-    # 今期のWebデータを取得
     df_web = fetch_web_history(SEASON_START, SEASON_END, selected_season)
-    
-    # 統合
     df_all = pd.concat([pd.DataFrame(all_rows), df_web]).drop_duplicates(subset=['match_uid', 'player']) if all_rows or not df_web.empty else pd.DataFrame()
-    
     if not df_all.empty:
         df_all['rank'] = df_all.groupby('match_uid')['point'].rank(ascending=False, method='min').fillna(4).astype(int)
     return df_all
@@ -150,13 +143,8 @@ df_master = get_master_data()
 with st.sidebar:
     st.divider()
     st.markdown("### 🛠 データ管理")
-    
-    # 今期データの抽出
     df_cur_season = df_master[df_master['season'] == selected_season]
-    
-    # CSV出力機能
     if not df_cur_season.empty:
-        # ご要望に基づき「現在の表示件数」の表示を削除しました
         output = io.BytesIO()
         df_cur_season.to_csv(output, index=False, encoding='cp932')
         st.download_button(
@@ -165,18 +153,14 @@ with st.sidebar:
             file_name=f"history_{selected_season}.csv",
             mime="text/csv"
         )
-    
-    # シーズン終了後のアラート機能
     today_str = datetime.datetime.now().strftime('%Y%m%d')
     if today_str > SEASON_END:
         csv_path = f"history_{selected_season}.csv"
         if not os.path.exists(csv_path):
             st.error(f"⚠️ {selected_season} シーズンが終了しています。記録保存のためにCSVをアップロードしてください。")
-    
     if st.button('🔄 データを最新に更新'):
         st.cache_data.clear()
         st.rerun()
-
     st.divider()
     st.caption("Data Source: M-League Official / Archives")
 
@@ -193,7 +177,6 @@ with tab1:
         if df_cur.empty:
             st.info("このシーズンのデータはありません。")
         else:
-            # 1. 総合順位表
             col1, col2 = st.columns([1, 1.2])
             pts_cur = df_cur.groupby('player')['point'].sum()
             with col1:
@@ -208,7 +191,6 @@ with tab1:
                     bg = TEAM_CONFIG.get(r.オーナー, {}).get('bg_color', '#fff')
                     html += f'<tr style="background-color:{bg}"><td>{i}</td><td>{r.オーナー}</td><td>{r.合計:+.1f}</td></tr>'
                 st.markdown(html + '</table>', unsafe_allow_html=True)
-            
             with col2:
                 ld = df_cur['date'].max()
                 st.markdown(f'<div class="section-label">🀄 最新結果 ({ld[4:6]}/{ld[6:]})</div>', unsafe_allow_html=True)
@@ -221,8 +203,6 @@ with tab1:
                         bg = TEAM_CONFIG.get(row.owner, {'bg_color':'#eee'})['bg_color']
                         html += f'<tr style="background-color:{bg}"><td>{row.player}</td><td>{row.owner}</td><td>{row.point:+.1f}</td></tr>'
                     st.markdown(html + '</table>', unsafe_allow_html=True)
-
-            # 2. ポイント推移グラフ
             st.markdown('<div class="section-label">📈 ポイント推移</div>', unsafe_allow_html=True)
             match_pts = df_cur.groupby(['match_uid', 'owner'])['point'].sum().unstack().fillna(0)
             sorted_uids = sorted(match_pts.index, key=lambda x: (x.split('_')[0], int(x.split('_')[1])))
@@ -233,24 +213,25 @@ with tab1:
                            color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
+# 共通集計関数：HTMLテーブル化して内部スクロールを回避
+def display_html_stats(df, group_key):
+    stats = df.groupby(group_key).agg(pt=('point','sum'), n=('point','count')).reset_index()
+    for r in range(1, 5):
+        stats[f'{r}着'] = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
+    stats['平均'] = (stats['pt'] / stats['n']).round(2)
+    stats = stats.sort_values('pt', ascending=False)
+    
+    html = f'<table class="pog-table"><tr><th>{group_key}</th><th>通算pt</th><th>試合数</th><th>平均</th><th>1着</th><th>2着</th><th>3着</th><th>4着</th></tr>'
+    for r in stats.itertuples():
+        html += f'<tr><td>{getattr(r, group_key)}</td><td>{r.pt:+.1f}</td><td>{r.n}</td><td>{r.平均:+.2f}</td><td>{getattr(r, "_4")}</td><td>{getattr(r, "_5")}</td><td>{getattr(r, "_6")}</td><td>{getattr(r, "_7")}</td></tr>'
+    st.markdown(html + '</table>', unsafe_allow_html=True)
+
 with tab2:
     st.markdown('<div class="section-label">🏅 オーナー別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        o_stats = df_master.groupby('owner').agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
-        for r in range(1, 5):
-            o_stats[f'{r}着'] = df_master[df_master['rank']==r].groupby('owner')['rank'].count().reindex(o_stats['owner'], fill_value=0).values
-        o_stats['平均pt'] = (o_stats['通算pt'] / o_stats['試合数']).round(2)
-        for r in range(1, 5):
-            o_stats[f'{r}着率'] = (o_stats[f'{r}着'] / o_stats['試合数'] * 100).round(1).astype(str) + "%"
-        st.dataframe(o_stats.sort_values('通算pt', ascending=False), use_container_width=True, hide_index=True)
+        display_html_stats(df_master, 'owner')
 
 with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        p_stats = df_master.groupby('player').agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
-        for r in range(1, 5):
-            p_stats[f'{r}着'] = df_master[df_master['rank']==r].groupby('player')['rank'].count().reindex(p_stats['player'], fill_value=0).values
-        p_stats['平均pt'] = (p_stats['通算pt'] / p_stats['試合数']).round(2)
-        for r in range(1, 5):
-            p_stats[f'{r}着率'] = (p_stats[f'{r}着'] / p_stats['試合数'] * 100).round(1).astype(str) + "%"
-        st.dataframe(p_stats.sort_values('通算pt', ascending=False), use_container_width=True, hide_index=True)
+        display_html_stats(df_master, 'player')
