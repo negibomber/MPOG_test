@@ -143,7 +143,7 @@ df_master = get_master_data()
 with st.sidebar:
     st.divider()
     st.markdown("### 🛠 データ管理")
-    df_cur_season = df_master[df_master['season'] == selected_season]
+    df_cur_season = df_master[df_master['season'] == selected_season] if not df_master.empty else pd.DataFrame()
     if not df_cur_season.empty:
         output = io.BytesIO()
         df_cur_season.to_csv(output, index=False, encoding='cp932')
@@ -231,11 +231,10 @@ with tab2:
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
             return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
         
-        # height="auto" に修正して内部スクロールを防止
+        # height引数を削除してデフォルト（または"auto"）に任せる
         st.dataframe(
             df_owner.set_index('owner').style.apply(style_owner, axis=1).format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
-            use_container_width=True,
-            height=None # デフォルト設定に戻してエラーを回避
+            use_container_width=True
         )
 
 with tab3:
@@ -244,6 +243,5 @@ with tab3:
         df_player = get_stats_df(df_master, 'player')
         st.dataframe(
             df_player.set_index('player').style.format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
-            use_container_width=True,
-            height=None # デフォルト設定に戻してエラーを回避
+            use_container_width=True
         )
