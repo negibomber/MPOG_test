@@ -195,7 +195,6 @@ with tab1:
                 for uid in sorted(df_l['match_uid'].unique()):
                     df_m = df_l[df_l['match_uid'] == uid].sort_values("point", ascending=False)
                     st.write(f"**{df_m['m_label'].iloc[0]}**")
-                    # 修正：ヘッダー行を追加
                     html = '<table width="100%" style="border-collapse:collapse; font-size:0.85rem;">'
                     html += '<tr style="background:#666; color:white;"><th>選手</th><th>オーナー</th><th>ポイント</th></tr>'
                     for row in df_m.itertuples():
@@ -213,17 +212,31 @@ with tab1:
                            color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# 通算成績データ作成
+# 通算成績データ作成（数値データのまま返す）
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
         counts = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
         stats[f'{r}着'] = counts
-        pcts = (counts / stats['試合数'] * 100).round(1).astype(str)
-        stats[f'{r}着'] = stats[f'{r}着'].astype(str) + " (" + pcts + "%)"
+        # 割合はソートに影響しないよう別列にするか、表示時に加工する
+        stats[f'{r}着率'] = (counts / stats['試合数']).round(3)
     
     stats['平均pt'] = (stats['通算pt'] / stats['試合数']).round(2)
-    return stats[[group_key, '通算pt', '試合数', '平均pt', '1着', '2着', '3着', '4着']].sort_values('通算pt', ascending=False)
+    return stats[[group_key, '通算pt', '試合数', '平均pt', '1着', '2着', '3着', '4着', '1着率', '2着率', '3着率', '4着率']].sort_values('通算pt', ascending=False)
+
+# 数値として正しくソートするための列設定
+COL_CONFIG = {
+    "通算pt": st.column_config.NumberColumn("通算pt", format="%+.1f"),
+    "平均pt": st.column_config.NumberColumn("平均pt", format="%.2f"),
+    "1着": st.column_config.NumberColumn("1着", help="回数"),
+    "2着": st.column_config.NumberColumn("2着"),
+    "3着": st.column_config.NumberColumn("3着"),
+    "4着": st.column_config.NumberColumn("4着"),
+    "1着率": st.column_config.NumberColumn("1着率", format="%.1%"),
+    "2着率": st.column_config.NumberColumn("2着率", format="%.1%"),
+    "3着率": st.column_config.NumberColumn("3着率", format="%.1%"),
+    "4着率": st.column_config.NumberColumn("4着率", format="%.1%"),
+}
 
 with tab2:
     st.markdown('<div class="section-label">🏅 オーナー別通算成績</div>', unsafe_allow_html=True)
@@ -233,17 +246,20 @@ with tab2:
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
             return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
         
-        # エラー回避のため height を完全に省略し、ソート機能を優先
+        # 数値を維持したまま背景色だけ塗る
         st.dataframe(
-            df_owner.set_index('owner').style.apply(style_owner, axis=1).format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
-            use_container_width=True
+            df_owner.set_index('owner').style.apply(style_owner, axis=1),
+            use_container_width=True,
+            column_config=COL_CONFIG
         )
 
 with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
         df_player = get_stats_df(df_master, 'player')
+        # 選手別は色なし、数値ソートを最優先
         st.dataframe(
-            df_player.set_index('player').style.format({'通算pt': '{:+.1f}', '平均pt': '{:+.2f}'}),
-            use_container_width=True
+            df_player.set_index('player'),
+            use_container_width=True,
+            column_config=COL_CONFIG
         )
