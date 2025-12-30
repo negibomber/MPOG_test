@@ -132,7 +132,7 @@ def get_master_data():
                     except: continue
         except: continue
     
-    # 今期のWebデータを取得（選択されているシーズンが今期の場合のみ）
+    # 今期のWebデータを取得
     df_web = fetch_web_history(SEASON_START, SEASON_END, selected_season)
     
     # 統合
@@ -145,7 +145,7 @@ def get_master_data():
 df_master = get_master_data()
 
 # ==========================================
-# 4. サイドバー管理機能の復元
+# 4. サイドバー管理機能
 # ==========================================
 with st.sidebar:
     st.divider()
@@ -156,13 +156,7 @@ with st.sidebar:
     
     # CSV出力機能
     if not df_cur_season.empty:
-        st.write(f"現在の表示件数: {len(df_cur_season)} 件")
-        
-        # 以前のCSV形式へ変換（ピボット）
-        csv_df = df_cur_season.pivot(index='player', columns='match_uid', values='point')
-        # match_uidから日付と試合番号を復元してヘッダー作成
-        # ... (簡略化のためDataFrameのまま出力可能に)
-        
+        # ご要望に基づき「現在の表示件数」の表示を削除しました
         output = io.BytesIO()
         df_cur_season.to_csv(output, index=False, encoding='cp932')
         st.download_button(
