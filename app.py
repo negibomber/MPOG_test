@@ -95,18 +95,17 @@ def fetch_web_history_all_seasons():
 
 def get_master_data():
     all_rows = []
-    # 過去CSVの読み込み
     csv_files = [f for f in os.listdir('.') if f.startswith('history_') and f.endswith('.csv')]
     for f_path in csv_files:
         try:
-            try: df = pd.read_csv(f_path, encoding='cp932')
-            except: df = pd.read_csv(f_path, encoding='utf-8')
+            try: df_raw = pd.read_csv(f_path, encoding='cp932')
+            except: df_raw = pd.read_csv(f_path, encoding='utf-8')
             
-            if 'match_uid' in df.columns:
-                all_rows.extend(df.to_dict('records'))
+            if 'match_uid' in df_raw.columns:
+                all_rows.extend(df_raw.to_dict('records'))
             else:
                 # 古いマトリックス形式CSVの読み込み
-                df_raw = df if 'match_uid' in df.columns else pd.read_csv(f_path, header=None, encoding='cp932')
+                df_raw = pd.read_csv(f_path, header=None, encoding='cp932' if 'cp932' in f_path else 'utf-8')
                 dates = df_raw.iloc[0].tolist()
                 nums = df_raw.iloc[1].tolist()
                 s_name = f_path.replace("history_","").replace(".csv","")
@@ -116,15 +115,17 @@ def get_master_data():
                     for col in range(1, len(df_raw.columns)):
                         val = df_raw.iloc[i, col]
                         if pd.isna(val) or str(val).strip() == "": continue
-                        d_val = dates[col]
-                        if pd.isna(d_val): continue
-                        d_str = pd.to_datetime(d_val).strftime('%Y%m%d')
-                        m_num = int(float(str(nums[col])))
-                        all_rows.append({
-                            "season": s_name, "date": d_str, "match_uid": f"{d_str}_{m_num}", 
-                            "m_label": f"第{m_num}試合", "player": p_name, "point": float(str(val).replace('▲','-')), 
-                            "owner": ALL_PLAYER_TO_OWNER.get(p_name, "不明")
-                        })
+                        try:
+                            d_val = dates[col]
+                            if pd.isna(d_val): continue
+                            d_str = pd.to_datetime(d_val).strftime('%Y%m%d')
+                            m_num = int(float(str(nums[col])))
+                            all_rows.append({
+                                "season": s_name, "date": d_str, "match_uid": f"{d_str}_{m_num}", 
+                                "m_label": f"第{m_num}試合", "player": p_name, "point": float(str(val).replace('▲','-')), 
+                                "owner": ALL_PLAYER_TO_OWNER.get(p_name, "不明")
+                            })
+                        except: continue
         except: continue
     
     df_web = fetch_web_history_all_seasons()
@@ -142,19 +143,15 @@ df_master = get_master_data()
 with st.sidebar:
     st.divider()
     st.markdown("### 📥 データ書き出し")
-    
     if not df_master.empty:
-        # 1. 全期間CSV
         all_csv = io.BytesIO()
         df_master.to_csv(all_csv, index=False, encoding='cp932')
         st.download_button("📥 全期間CSVを保存", all_csv.getvalue(), "history_all.csv", "text/csv")
-        
-        # 2. 今期のみCSV
         df_cur_only = df_master[df_master['season'] == selected_season]
         if not df_cur_only.empty:
             cur_csv = io.BytesIO()
             df_cur_only.to_csv(cur_csv, index=False, encoding='cp932')
-            st.download_button(f"📥 {selected_season}CSVを保存", cur_csv.getvalue(), f"history_{selected_season}.csv", "text/csv")
+            st.download_button(f"📥 {selected_season}CSV保存", cur_csv.getvalue(), f"history_{selected_season}.csv", "text/csv")
 
     if st.button('🔄 データを最新に更新'):
         st.cache_data.clear()
@@ -212,7 +209,6 @@ with tab1:
                        color_discrete_map={k: v['color'] for k, v in cur_teams.items()}, markers=True)
         st.plotly_chart(fig, use_container_width=True)
 
-# 通算成績計算
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
