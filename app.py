@@ -48,17 +48,30 @@ SEASON_START = str(conf.get("start_date", "20000101"))
 SEASON_END = str(conf.get("end_date", "20991231"))
 TEAM_CONFIG = conf.get("teams", {})
 
-# スタイル設定
+# --- スタイル設定 (範囲を限定した最強設定) ---
 st.markdown("""
 <style>
     .section-label { font-weight: bold; margin: 25px 0 10px 0; font-size: 1.3rem; border-left: 8px solid #444; padding-left: 12px; color: #333; }
+    
+    /* 1. 自作のHTMLテーブル (今期成績) 内の文字だけを黒にする */
+    .pog-table td, .pog-table th {
+        color: black !important;
+    }
+
+    /* 2. Streamlitの st.dataframe 内のセルの文字だけを黒にする */
+    [data-testid="stTable"] td, [data-testid="stTable"] th, 
+    [data-testid="stDataFrame"] div[data-testid="stTable"] td {
+        color: black !important;
+    }
+    
+    /* 3. グラフの凡例などが影響を受けないよう、特定要素に絞って適用 */
 </style>
 """, unsafe_allow_html=True)
 
 st.title(f"🀄 M-POG Archives & Stats")
 
 # ==========================================
-# 3. データ処理
+# 3. データ処理 (一切変更なし)
 # ==========================================
 
 @st.cache_data(ttl=1800)
@@ -145,7 +158,7 @@ def get_master_data():
 df_master = get_master_data()
 
 # ==========================================
-# 4. サイドバー管理機能
+# 4. サイドバー管理機能 (一切変更なし)
 # ==========================================
 with st.sidebar:
     st.divider()
@@ -188,12 +201,12 @@ with tab1:
                     s = sum(pts_cur.get(p, 0) for p in c.get('players', []))
                     summary.append({"オーナー": o, "合計": s})
                 df_s = pd.DataFrame(summary).sort_values("合計", ascending=False)
-                html = '<table width="100%" style="border-collapse:collapse; font-size:0.9rem;">'
+                # クラス "pog-table" を追加
+                html = '<table class="pog-table" width="100%" style="border-collapse:collapse; font-size:0.9rem;">'
                 html += '<tr style="background:#444; color:white;"><th>順位</th><th>オーナー</th><th>合計</th></tr>'
                 for i, r in enumerate(df_s.itertuples(), 1):
                     bg = TEAM_CONFIG.get(r.オーナー, {}).get('bg_color', '#fff')
-                    # 修正: color: black !important; を追加して白文字化を防ぐ
-                    html += f'<tr style="background-color:{bg}; color:black !important; border-bottom:1px solid #ddd;"><td style="padding:8px; text-align:center;">{i}</td><td style="padding:8px; text-align:center;">{r.オーナー}</td><td style="padding:8px; text-align:center;">{r.合計:+.1f}</td></tr>'
+                    html += f'<tr style="background-color:{bg}; border-bottom:1px solid #ddd;"><td style="padding:8px; text-align:center;">{i}</td><td style="padding:8px; text-align:center;">{r.オーナー}</td><td style="padding:8px; text-align:center;">{r.合計:+.1f}</td></tr>'
                 st.markdown(html + '</table>', unsafe_allow_html=True)
 
             with col2:
@@ -203,12 +216,12 @@ with tab1:
                 for uid in sorted(df_l['match_uid'].unique()):
                     df_m = df_l[df_l['match_uid'] == uid].sort_values("point", ascending=False)
                     st.write(f"**{df_m['m_label'].iloc[0]}**")
-                    html = '<table width="100%" style="border-collapse:collapse; font-size:0.85rem;">'
+                    # クラス "pog-table" を追加
+                    html = '<table class="pog-table" width="100%" style="border-collapse:collapse; font-size:0.85rem;">'
                     html += '<tr style="background:#666; color:white;"><th>選手</th><th>オーナー</th><th>ポイント</th></tr>'
                     for row in df_m.itertuples():
                         bg = TEAM_CONFIG.get(row.owner, {'bg_color':'#eee'})['bg_color']
-                        # 修正: color: black !important; を追加
-                        html += f'<tr style="background-color:{bg}; color:black !important; border-bottom:1px solid #ddd;"><td style="padding:6px; text-align:center;">{row.player}</td><td style="padding:6px; text-align:center;">{row.owner}</td><td style="padding:6px; text-align:center;">{row.point:+.1f}</td></tr>'
+                        html += f'<tr style="background-color:{bg}; border-bottom:1px solid #ddd;"><td style="padding:6px; text-align:center;">{row.player}</td><td style="padding:6px; text-align:center;">{row.owner}</td><td style="padding:6px; text-align:center;">{row.point:+.1f}</td></tr>'
                     st.markdown(html + '</table>', unsafe_allow_html=True)
             
             st.markdown('<div class="section-label">📈 ポイント推移</div>', unsafe_allow_html=True)
@@ -221,6 +234,7 @@ with tab1:
                             color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
+# 集計ロジック (一切変更なし)
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
@@ -255,8 +269,7 @@ with tab2:
         df_owner = get_stats_df(df_master, 'owner')
         def style_owner_all(row):
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
-            # 修正: 文字色を明示的に指定
-            return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
+            return [f'background-color: {color}; font-weight: bold'] * len(row)
         st.dataframe(
             df_owner.set_index('owner').style.apply(style_owner_all, axis=1),
             use_container_width=True,
@@ -266,7 +279,8 @@ with tab2:
 with tab3:
     st.markdown('<div class="section-label">👤 選手別通算成績</div>', unsafe_allow_html=True)
     if not df_master.empty:
-        df_player = get_stats_df(df_master, 'player')
+        df_player = get_stats_df(df_player := get_stats_df(df_master, 'player'), 'player') # 代入ミス防止
+        df_player = get_stats_df(df_master, 'player') # 念のため再定義
         st.dataframe(
             df_player.set_index('player'),
             use_container_width=True,
@@ -280,8 +294,7 @@ with tab4:
         def style_pairing(row):
             owner_val = row['owner']
             color = OWNER_COLOR_MAP.get(owner_val, "#ffffff")
-            # 修正: 文字色を明示的に指定
-            return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
+            return [f'background-color: {color}; font-weight: bold'] * len(row)
         st.dataframe(
             df_pairing.style.apply(style_pairing, axis=1),
             use_container_width=True,
