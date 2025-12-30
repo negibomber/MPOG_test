@@ -120,10 +120,12 @@ def get_master_data():
                             for b in range(col, 0, -1):
                                 if not pd.isna(dates[b]) and str(dates[b]) != "":
                                     d_val = dates[b]; break
-                        d_str = pd.to_datetime(d_val).strftime('%Y%m%d')
+                        
+                        # ここを修正しました (d_str ではなく date_str に統一)
+                        date_str = pd.to_datetime(d_val).strftime('%Y%m%d')
                         m_num = int(float(str(nums[col])))
                         all_rows.append({
-                            "season": s_name, "date": d_str, "match_uid": f"{date_str}_{m_num}", 
+                            "season": s_name, "date": date_str, "match_uid": f"{date_str}_{m_num}", 
                             "m_label": f"第{m_num}試合", "player": p_name, "point": score, 
                             "owner": ALL_PLAYER_TO_OWNER.get(p_name, "不明")
                         })
@@ -212,18 +214,15 @@ with tab1:
                             color_discrete_map={k: v['color'] for k, v in TEAM_CONFIG.items()}, markers=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# --- 通算成績計算ロジック（修正：回数と割合を分離し、数値で保持） ---
 def get_stats_df(df, group_key):
     stats = df.groupby(group_key).agg(通算pt=('point','sum'), 試合数=('point','count')).reset_index()
     for r in range(1, 5):
         counts = df[df['rank']==r].groupby(group_key)['rank'].count().reindex(stats[group_key], fill_value=0).values
         stats[f'{r}着'] = counts
         stats[f'{r}着(%)'] = (counts / stats['試合数'] * 100).round(1)
-    
     stats['平均pt'] = (stats['通算pt'] / stats['試合数']).round(2)
     return stats.sort_values('通算pt', ascending=False)
 
-# 通算用カラム設定
 STATS_COL_CONF = {
     "通算pt": st.column_config.NumberColumn("通算pt", format="%.1f"),
     "平均pt": st.column_config.NumberColumn("平均pt", format="%.2f"),
@@ -238,10 +237,8 @@ with tab2:
     if not df_master.empty:
         df_owner = get_stats_df(df_master, 'owner')
         def style_owner_all(row):
-            # オーナーのbg_colorを取得（インデックス名から逆引き）
             color = OWNER_COLOR_MAP.get(row.name, "#ffffff")
             return [f'background-color: {color}; color: black; font-weight: bold'] * len(row)
-        
         st.dataframe(
             df_owner.set_index('owner').style.apply(style_owner_all, axis=1),
             use_container_width=True,
